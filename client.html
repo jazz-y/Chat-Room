@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+   <meta charset="utf-8">
+   <style>
+      body {
+         background: rgb(47, 237, 95);
+         background: linear-gradient(90deg, rgb(115, 245, 119) 0%, rgb(61, 212, 217)) 100%;
+         text-align: center;
+         font-family: 'Lucida Sans', 'Lucida Sans Regular', 'Lucida Grande', 'Lucida Sans Unicode', Geneva, Verdana, sans-serif
+      }
+      button {
+         padding: 12px 20x;
+         background-color: #000000;
+         color: #fff;
+         border: none;
+         border-radius: 4px;
+      }
+   </style>
+   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+   <script src="/socket.io/socket.io.js"></script>
+   <script>
+      let thisuser;
+      let thisroom;
+      var socketio = io.connect();
+
+      // display list of chat rooms
+      socketio.on("return_rooms", function (data) {
+         if(!thisroom){
+            let chatrooms = document.getElementById("chatrooms");
+            $(".loggedin").show();
+            chatrooms.innerHTML = "";
+            let rooms = data["rooms"];
+            rooms["roomNames"].forEach(function (rooms) {
+               console.log("in for each loop");
+               // show the list of rooms
+               let listroom = document.createElement("div");
+               let roomname = document.createElement("h3");
+               let pw = document.createElement("input");
+               let joinroom = document.createElement("button");
+
+               roomname.textContent = rooms;
+               listroom.appendChild(roomname);
+
+               pw.type = "password";
+               pw.placeholder = "Password";
+               listroom.appendChild(pw);
+
+               joinroom.textContent = "Join";
+               // adding event listener with vanilla js
+               joinroom.addEventListener("click", function (data) {
+                  if (pw.value != "") {
+                     thisroom = roomname.textContent;
+                     socketio.emit("join_room", { room: thisroom, user: thisuser, password: pw.value });
+                  } else {
+                     alert("Cannot join chatroom");
+                  }
+               });
+               listroom.appendChild(joinroom);
+               chatrooms.appendChild(listroom);
+            });
+         }  
+
+      });
+      
+      // show the in chat room content
+      let currRoom = null;
+      socketio.on("room_joined", function (data) {
+         // check if password is entered correctly
+         if (data["joined"]) {
+            document.querySelector(".notloggedin").style.display = 'none';
+            document.querySelector(".loggedin").style.display = 'none';
+            $("#chatlog").empty();
+            $("#chatrooms").empty();
+            // Display the "inroom" content
+            if (data.roomname != currRoom) {
+               currentRoom = data.roomname;
+               // Hide existing room information
+               document.getElementById("roomname").innerHTML = '';
+               // show the room title
+               let title = document.createElement("h2");
+               title.textContent = data.roomname;
+               document.getElementById("roomname").appendChild(title);
+               document.getElementById("roomname").appendChild(document.createElement("hr"));
+            }
+
+            document.querySelector(".inroom").style.display = 'block';
+            // gets the array of members and list them
+            let members = data["room"].members;
+            console.log(data["room"].members + "these are the members");
+            socketio.on("update_members", function (data) {
+               $("#userList").empty();
+               data["members"].forEach(function (member) {
+                  let list = $("<li>").text(member);
+                  $("#userList").append(list);
+               });
+
+            })
+
+            // check if user is admin: If so, display kick/block
+            if (data.admin) {
+               document.querySelector(".admin").style.display = 'block';
+               // kick user
+               $("#kick").on("click", function (data) {
+                  let kickuser = document.getElementById("kickuser").value;
+                  socketio.emit("kick_user", {room: thisroom, user: thisuser, target: kickuser});
+                  console.log("kicking: " + kickuser);
+               });
+               // ban user
+               $("#ban").on("click", function (data) {
+                  let banuser = document.getElementById("banuser").value;
+                  socketio.emit("ban_user", { user: thisuser, target: banuser, room: thisroom });
+               });
+            } else {
+               $(".admin").hide();
+            }
+            $("#leave").on("click", function () {
+               socketio.emit("exit_room", { room: thisroom, user: thisuser });
+               socketio.emit("get_rooms", { "user": thisuser });
+            });
+
+         } else {
+            alert("Cannot join room: " + data.message);
+         }
+
+      });
+
+      // Every client listens if they got kicked, clears room stuff and takes them back to the room of lists 
+      socketio.on("kick_listen", function (data) {
+         // removes the div with all the login stuff and their listeners
+         // keep order of operations
+         $(".inroom").hide();
+         $(".inchatroom").find("*").off();
+         // get all the rooms and display them
+         socketio.emit("get_rooms", { user: thisuser });
+         alert(data["message"]);
+         thisroom = null;
+      });
+
+      socketio.on("user_kicked", function (data) {
+         alert(data.message);
+
+      });
+
+      // display banned user's page
+      socketio.on("user_banned"), function (data) {
+         alert(data.message);
+      }
+
+      socketio.on("exited_room", function (data) {
+         // hide inroom features 
+         document.querySelector(".inroom").style.display = 'none';
+         // show loggedin page
+         document.querySelector(".loggedin").style.display = 'block';
+
+      });
+
+      // display messages in room
+      socketio.on("new_public_msg", function (data) {
+         $('#chatlog').append('<b>' + data["user"] + '</b> -> ' + data.time + ': ' + data['message'] + '<br>');
+      });
+
+      //display private messages 
+      socketio.on("pm_receive", function (data) {
+         $('#chatlog').append('<b>' + data["user"] + ' (Private)' + '</b> -> ' + data.time + ': ' + data['message'] + '<br>');
+      });
+
+      socketio.on("sent_pm", function (data) {
+         alert(data.message);
+      });
+
+      socketio.on("room_created", function (data) {
+         alert(data.message);
+      });
+
+      function sendMessage() {
+         var msg = document.getElementById("message_input").value;
+         // Gettting current user date
+         const sendTime = new Date();
+         socketio.emit("public_msg", { message: msg, user: thisuser, room: thisroom, time: sendTime });
+      }
+
+      function sendPrivate() {
+         var privmsg = document.getElementById("private_input").value;
+         let privuser = document.getElementById("privuser").value;
+         const sendTime = new Date();
+         socketio.emit("pm", { message: privmsg, user: thisuser, target: privuser, room: thisroom, time: sendTime });
+      }
+
+      function createRoom() {
+         let room = document.getElementById("chatroom").value;
+         let password = document.getElementById("roompw").value;
+         thisuser = document.getElementById("username").value;
+         if (room != "" && password != "") {
+            socketio.emit("new_room", { "roomname": room, "password": password, "admin": thisuser });
+         } else {
+            alert("Try again");
+         }
+
+      }
+      // send user
+      function user() {
+         thisuser = document.getElementById("username").value;
+         socketio.emit("new_user", { user: thisuser });
+      }
+   </script>
+</head>
+
+<body>
+   <!-- Enter username and join -->
+   <div class="joined">
+      <div class="notloggedin">
+         <h1>Welcome to Chat App</h1>
+         <h3>Type in a username below </h3>
+         <input type="text" id="username" />
+         <button id="user">Enter </button>
+      </div>
+
+      <div class="loggedin" style="display: none">
+         <h1> Join an existing room or Create your own <br> </h1>
+         <!-- Create chatroom -->
+         <input type="text" id="chatroom" placeholder="Room Name" />
+         <input type="text" id="roompw" placeholder="Password" />
+         <button id="createroom">Create </button>
+
+         <div id="chatrooms"></div>
+
+      </div>
+      <div class="inroom" style="display: none">
+         <div id="roomname"></div>
+         <!-- Leave chatroom -->
+         <button id="leave">Leave </button>
+
+         <!-- Display current users -->
+         <div class="inchatroom">
+            <h4>Current users: <br> </h4>
+            <ul id="userList"></ul>
+
+            <div class="admin" style="display: none">
+               <input type="text" id="kickuser" />
+               <button id="kick">Kick</button> <br>
+
+               <input type="text" id="banuser" />
+               <button id="ban">Ban</button> <br>
+            </div>
+
+            <!-- Send Messages to all -->
+            <input type="text" id="message_input" style="width: 300px;" />
+            <button onclick="sendMessage()">send</button>
+            <div id="chatlog"></div>
+
+            <!-- private message -->
+            DM: To user: <input type="text" id="privuser" />
+            Msg: <input type="text" id="private_input" />
+            <button onclick="sendPrivate()">send private</button>
+         </div>
+      </div>
+   </div>
+   <script>
+      document.getElementById('user').addEventListener("click", loggedin);
+      document.getElementById('createroom').addEventListener("click", createRoom);
+
+      function loggedin() {
+         thisuser = document.getElementById("username").value;
+         socketio.emit("get_rooms", { user: thisuser });
+         user();
+         // hide notloggedin class and its children
+         document.getElementsByClassName('notloggedin')[0].style.visibility = 'hidden';
+         document.querySelector(".loggedin").style.display = 'block';
+         $("#user").off("click", loggedin); 
+      }
+
+   </script>
+</body>
+</html>
